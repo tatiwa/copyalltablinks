@@ -1,28 +1,55 @@
 chrome.action.onClicked.addListener(async (tab) => {
-  if (!tab || !tab.id || !tab.url) {
-    console.error("No active tab to copy.");
+  if (!tab || tab.id === undefined || tab.id === chrome.tabs.TAB_ID_NONE) {
+    console.error("No active tab to copy from.");
+    return;
+  }
+  if (tab.windowId === undefined) {
+    console.error("Unable to determine current window.");
+    return;
+  }
+
+  let tabsInWindow;
+  try {
+    tabsInWindow = await chrome.tabs.query({ windowId: tab.windowId });
+  } catch (error) {
+    console.error("Failed to query tabs for the window.", error);
+    return;
+  }
+
+  const tabsToCopy = tabsInWindow
+    .map((currentTab) => {
+      const url = currentTab.url || currentTab.pendingUrl;
+      if (!url) return null;
+      return {
+        title: currentTab.title || url,
+        url,
+      };
+    })
+    .filter(Boolean);
+
+  if (tabsToCopy.length === 0) {
+    console.error("No tabs with URLs available to copy.");
     return;
   }
 
   try {
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: copyLinkToClipboard,
-      args: [tab.title ?? tab.url, tab.url],
+      func: copyLinksToClipboard,
+      args: [tabsToCopy],
       world: "MAIN",
     });
   } catch (error) {
-    console.error("Failed to write to clipboard", error);
+    console.error("Failed to write tab list to clipboard", error);
   }
 });
 
-async function copyLinkToClipboard(title, url) {
-  if (!url) {
-    throw new Error("Tab URL is missing.");
+async function copyLinksToClipboard(tabs) {
+  if (!Array.isArray(tabs) || tabs.length === 0) {
+    throw new Error("No tabs provided for copying.");
   }
 
-  const safeTitle = (title || url).trim();
-  const { html, text } = buildLinkPayload(safeTitle, url);
+  const { html, text } = buildTabListPayload(tabs);
 
   if (navigator.clipboard && "write" in navigator.clipboard && window.ClipboardItem) {
     const htmlBlob = new Blob([html], { type: "text/html" });
@@ -37,6 +64,28 @@ async function copyLinkToClipboard(title, url) {
     await navigator.clipboard.writeText(text);
   } else {
     throw new Error("Clipboard API is unavailable in this page.");
+  }
+
+  function buildTabListPayload(tabList) {
+    const htmlItems = [];
+    const textItems = [];
+
+    for (const current of tabList) {
+      if (!current || !current.url) continue;
+      const safeTitle = (current.title || current.url).trim();
+      const { html, text } = buildLinkPayload(safeTitle, current.url);
+      htmlItems.push(`<li>${html}</li>`);
+      textItems.push(text);
+    }
+
+    if (!htmlItems.length || !textItems.length) {
+      throw new Error("No valid tab entries to copy.");
+    }
+
+    return {
+      html: `<ul>${htmlItems.join("")}</ul>`,
+      text: textItems.join("\n"),
+    };
   }
 
   function buildLinkPayload(currentTitle, currentUrl) {
