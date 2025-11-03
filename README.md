@@ -5,6 +5,8 @@ Copy All Tab Links is a Chrome extension that copies every tab's title and URL f
 ### Features
 - Copies all tab titles and URLs from the active window in one click
 - Produces an HTML unordered list alongside newline-separated plain text
+- Includes each tab's favicon in the HTML output for easy visual scanning
+- Favicons are limited to PNG/JPG/GIF formats so the list pastes cleanly into Google Docs
 - Retains Jira issue key detection and cleaned-up titles
 - Uses the Clipboard API for rich data where supported, with graceful fallback to plain text
 
@@ -23,7 +25,7 @@ When you click the extension button, the background service worker gathers every
 4. Click "Load unpacked" and select the `copyalltablinks` folder
 
 ### Usage
-Click the extension icon while any tab is active. The titles and URLs for all tabs in the current window will be copied to your clipboard. On JIRA pages, the issue key is highlighted and the rest of the title is tidied.
+Click the extension icon while any tab is active. The titles and URLs for all tabs in the current window will be copied to your clipboard. The HTML list includes each tab's favicon, while the plain-text copy remains unchanged. On JIRA pages, the issue key is highlighted and the rest of the title is tidied.
 
 ### License
 MIT

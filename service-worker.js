@@ -23,6 +23,7 @@ chrome.action.onClicked.addListener(async (tab) => {
       return {
         title: currentTab.title || url,
         url,
+        favIconUrl: currentTab.favIconUrl,
       };
     })
     .filter(Boolean);
@@ -74,7 +75,8 @@ async function copyLinksToClipboard(tabs) {
       if (!current || !current.url) continue;
       const safeTitle = (current.title || current.url).trim();
       const { html, text } = buildLinkPayload(safeTitle, current.url);
-      htmlItems.push(`<li>${html}</li>`);
+      const faviconHtml = buildFaviconMarkup(current.favIconUrl);
+      htmlItems.push(`<li>${faviconHtml}${html}</li>`);
       textItems.push(text);
     }
 
@@ -169,5 +171,49 @@ async function copyLinksToClipboard(tabs) {
 
   function escapeAttribute(value) {
     return value.replace(/["']/g, (char) => (char === '"' ? "&quot;" : "&#39;"));
+  }
+
+  function buildFaviconMarkup(iconUrl) {
+    if (!iconUrl || typeof iconUrl !== "string") return "";
+    const trimmed = iconUrl.trim();
+    if (!trimmed || !isSupportedFaviconSource(trimmed)) return "";
+    return `<img src="${escapeAttribute(trimmed)}" alt="" style="width:16px;height:16px;vertical-align:middle;margin-right:6px;">`;
+  }
+
+  function isSupportedFaviconSource(candidate) {
+    const lower = candidate.toLowerCase();
+    const allowedImageTypes = ["png", "jpg", "jpeg", "gif"];
+
+    if (lower.startsWith("data:image/")) {
+      return allowedImageTypes.some((type) => lower.startsWith(`data:image/${type}`));
+    }
+
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(candidate);
+    } catch {
+      return false;
+    }
+
+    if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+      return false;
+    }
+
+    const pathname = parsedUrl.pathname.toLowerCase();
+    const hasAllowedExtension = allowedImageTypes.some((type) => pathname.endsWith(`.${type}`));
+    if (hasAllowedExtension) {
+      return true;
+    }
+
+    const formatParam = parsedUrl.searchParams.get("format");
+    if (formatParam && allowedImageTypes.includes(formatParam.toLowerCase())) {
+      return true;
+    }
+
+    if (parsedUrl.hostname.includes("google") && pathname.includes("/s2/favicons")) {
+      return true;
+    }
+
+    return false;
   }
 }
