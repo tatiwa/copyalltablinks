@@ -1,3 +1,5 @@
+const copyAllLinkHelpers = createCopyAllLinkHelpers();
+
 chrome.action.onClicked.addListener(async (tab) => {
   if (!tab || tab.id === undefined || tab.id === chrome.tabs.TAB_ID_NONE) {
     console.error("No active tab to copy from.");
@@ -39,12 +41,13 @@ chrome.action.onClicked.addListener(async (tab) => {
       return { ...tabInfo, faviconDataUri };
     })
   );
+  const { html, text } = copyAllLinkHelpers.buildTabListPayload(tabsWithFavicons);
 
   try {
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: copyLinksToClipboard,
-      args: [tabsWithFavicons],
+      func: copyTabListPayloadToClipboard,
+      args: [html, text],
       world: "MAIN",
     });
   } catch (error) {
@@ -52,13 +55,7 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 });
 
-async function copyLinksToClipboard(tabs) {
-  if (!Array.isArray(tabs) || tabs.length === 0) {
-    throw new Error("No tabs provided for copying.");
-  }
-
-  const { html, text } = buildTabListPayload(tabs);
-
+async function copyTabListPayloadToClipboard(html, text) {
   if (navigator.clipboard && "write" in navigator.clipboard && window.ClipboardItem) {
     const htmlBlob = new Blob([html], { type: "text/html" });
     const textBlob = new Blob([text], { type: "text/plain" });
@@ -72,119 +69,6 @@ async function copyLinksToClipboard(tabs) {
     await navigator.clipboard.writeText(text);
   } else {
     throw new Error("Clipboard API is unavailable in this page.");
-  }
-
-  function buildTabListPayload(tabList) {
-    const htmlItems = [];
-    const textItems = [];
-
-    for (const current of tabList) {
-      if (!current || !current.url) continue;
-      const safeTitle = (current.title || current.url).trim();
-      const { html, text } = buildLinkPayload(safeTitle, current.url);
-      const faviconHtml = buildFaviconMarkup(current.faviconDataUri);
-      htmlItems.push(`<li>${faviconHtml}${html}</li>`);
-      textItems.push(text);
-    }
-
-    if (!htmlItems.length || !textItems.length) {
-      throw new Error("No valid tab entries to copy.");
-    }
-
-    return {
-      html: `<ul>${htmlItems.join("")}</ul>`,
-      text: textItems.join("\n"),
-    };
-  }
-
-  function buildLinkPayload(currentTitle, currentUrl) {
-    const issueKey = detectJiraIssueKey(currentUrl, currentTitle);
-
-    if (issueKey) {
-      const suffixTitle = normalizeJiraTitle(currentTitle, issueKey);
-      const separator = suffixTitle ? " " : "";
-      const htmlTitle = suffixTitle ? separator + escapeHtml(suffixTitle) : "";
-      const plainTitle = suffixTitle ? separator + suffixTitle : "";
-
-      return {
-        html: `<a href="${escapeAttribute(currentUrl)}">${escapeHtml(issueKey)}</a>${htmlTitle}`,
-        text: `${issueKey}${plainTitle} (${currentUrl})`,
-      };
-    }
-
-    return {
-      html: `<a href="${escapeAttribute(currentUrl)}">${escapeHtml(currentTitle)}</a>`,
-      text: `${currentTitle} (${currentUrl})`,
-    };
-  }
-
-  // Stricter Jira key detection: only Jira-like hosts + strict KEY_RE
-  function detectJiraIssueKey(currentUrl, currentTitle) {
-    const KEY_RE = /\b([A-Z]{2,10}-\d{1,6})\b/;
-    let parsed;
-    try {
-      parsed = new URL(currentUrl);
-    } catch {
-      parsed = null;
-    }
-
-    if (parsed) {
-      const host = parsed.hostname.toLowerCase();
-      const hostLooksLikeJira =
-        /(^|\.)jira\./i.test(host) ||
-        host.endsWith(".atlassian.net") ||
-        host === "atlassian.net";
-
-      if (hostLooksLikeJira) {
-        const pathMatch = parsed.pathname.match(KEY_RE);
-        if (pathMatch) return pathMatch[1];
-
-        if (parsed.search) {
-          const queryValues = Array.from(parsed.searchParams.values()).join(" ");
-          const queryMatch = queryValues.match(KEY_RE);
-            if (queryMatch) return queryMatch[1];
-        }
-      }
-    }
-
-    if (currentTitle) {
-      const titleMatch = currentTitle.toUpperCase().match(KEY_RE);
-      if (titleMatch) return titleMatch[1];
-    }
-
-    return null;
-  }
-
-  function normalizeJiraTitle(currentTitle, issueKey) {
-    if (!currentTitle) return "";
-    let cleanedTitle = currentTitle.replace(/\s*[-|:]?\s*Jira.*$/i, "");
-    const issueKeyPattern = new RegExp(`^\\s*\\[?${issueKey}\\]?\\s*[-:|]?\\s*`, "i");
-    cleanedTitle = cleanedTitle.replace(issueKeyPattern, "");
-    return cleanedTitle.trim();
-  }
-
-  function escapeHtml(value) {
-    return value.replace(/[&<>"']/g, (char) => {
-      switch (char) {
-        case "&": return "&amp;";
-        case "<": return "&lt;";
-        case ">": return "&gt;";
-        case '"': return "&quot;";
-        case "'": return "&#39;";
-        default: return char;
-      }
-    });
-  }
-
-  function escapeAttribute(value) {
-    return value.replace(/["']/g, (char) => (char === '"' ? "&quot;" : "&#39;"));
-  }
-
-  function buildFaviconMarkup(dataUri) {
-    if (!dataUri || typeof dataUri !== "string") return "";
-    const trimmed = dataUri.trim();
-    if (!trimmed.startsWith("data:image/png")) return "";
-    return `<img src="${escapeAttribute(trimmed)}" alt="" style="width:16px;height:16px;vertical-align:middle;margin-right:6px;">`;
   }
 }
 
@@ -349,4 +233,135 @@ async function blobToDataUri(blob) {
     reader.onerror = (error) => reject(error);
     reader.readAsDataURL(blob);
   });
+}
+
+function createCopyAllLinkHelpers() {
+  function buildTabListPayload(tabList) {
+    const htmlItems = [];
+    const textItems = [];
+
+    for (const current of tabList) {
+      if (!current || !current.url) continue;
+      const explicitTitle = (current.title || "").trim();
+      const displayTitle = explicitTitle || current.url;
+      const { html, text } = buildLinkPayload(displayTitle, current.url, Boolean(explicitTitle));
+      const faviconHtml = buildFaviconMarkup(current.faviconDataUri);
+      htmlItems.push(`<li>${faviconHtml}${html}</li>`);
+      textItems.push(text);
+    }
+
+    if (!htmlItems.length || !textItems.length) {
+      throw new Error("No valid tab entries to copy.");
+    }
+
+    return {
+      html: `<ul>${htmlItems.join("")}</ul>`,
+      text: textItems.join("\n"),
+    };
+  }
+
+  function buildLinkPayload(currentTitle, currentUrl, hasExplicitTitle) {
+    const issueKey = detectJiraIssueKey(currentUrl, hasExplicitTitle ? currentTitle : null);
+
+    if (issueKey) {
+      const suffixTitle = normalizeJiraTitle(currentTitle, issueKey);
+      const separator = suffixTitle ? " " : "";
+      const htmlTitle = suffixTitle ? separator + escapeHtml(suffixTitle) : "";
+      const plainTitle = suffixTitle ? separator + suffixTitle : "";
+
+      return {
+        html: `<a href="${escapeAttribute(currentUrl)}">${escapeHtml(issueKey)}</a>${htmlTitle}`,
+        text: `${issueKey}${plainTitle} (${currentUrl})`,
+      };
+    }
+
+    return {
+      html: `<a href="${escapeAttribute(currentUrl)}">${escapeHtml(currentTitle)}</a>`,
+      text: `${currentTitle} (${currentUrl})`,
+    };
+  }
+
+  function detectJiraIssueKey(currentUrl, currentTitle) {
+    const KEY_RE = /\b([A-Z]{2,10}-\d{1,6})\b/;
+    let parsed;
+    try {
+      parsed = new URL(currentUrl);
+    } catch {
+      parsed = null;
+    }
+
+    if (parsed) {
+      const host = parsed.hostname.toLowerCase();
+      const hostLooksLikeJira =
+        /(^|\.)jira\./i.test(host) ||
+        host.endsWith(".atlassian.net") ||
+        host === "atlassian.net";
+
+      if (hostLooksLikeJira) {
+        const pathMatch = parsed.pathname.match(KEY_RE);
+        if (pathMatch) return pathMatch[1];
+
+        if (parsed.search) {
+          const queryValues = Array.from(parsed.searchParams.values()).join(" ");
+          const queryMatch = queryValues.match(KEY_RE);
+          if (queryMatch) return queryMatch[1];
+        }
+      }
+    }
+
+    if (currentTitle) {
+      const titleMatch = currentTitle.toUpperCase().match(KEY_RE);
+      if (titleMatch) return titleMatch[1];
+    }
+
+    return null;
+  }
+
+  function normalizeJiraTitle(currentTitle, issueKey) {
+    if (!currentTitle) return "";
+    let cleanedTitle = currentTitle.replace(/\s*[-|:]?\s*Jira.*$/i, "");
+    const issueKeyPattern = new RegExp(`^\\s*\\[?${issueKey}\\]?\\s*[-:|]?\\s*`, "i");
+    cleanedTitle = cleanedTitle.replace(issueKeyPattern, "");
+    return cleanedTitle.trim();
+  }
+
+  function escapeHtml(value) {
+    return value.replace(/[&<>"']/g, (char) => {
+      switch (char) {
+        case "&": return "&amp;";
+        case "<": return "&lt;";
+        case ">": return "&gt;";
+        case '"': return "&quot;";
+        case "'": return "&#39;";
+        default: return char;
+      }
+    });
+  }
+
+  function escapeAttribute(value) {
+    return value.replace(/["']/g, (char) => (char === '"' ? "&quot;" : "&#39;"));
+  }
+
+  function buildFaviconMarkup(dataUri) {
+    if (!dataUri || typeof dataUri !== "string") return "";
+    const trimmed = dataUri.trim();
+    if (!trimmed.startsWith("data:image/png")) return "";
+    return `<img src="${escapeAttribute(trimmed)}" alt="" style="width:16px;height:16px;vertical-align:middle;margin-right:6px;">`;
+  }
+
+  return {
+    buildTabListPayload,
+    buildLinkPayload,
+    detectJiraIssueKey,
+    normalizeJiraTitle,
+    escapeHtml,
+    escapeAttribute,
+    buildFaviconMarkup,
+  };
+}
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    createCopyAllLinkHelpers,
+  };
 }
