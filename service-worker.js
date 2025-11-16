@@ -244,7 +244,7 @@ function createCopyAllLinkHelpers() {
       if (!current || !current.url) continue;
       const explicitTitle = (current.title || "").trim();
       const displayTitle = explicitTitle || current.url;
-      const { html, text } = buildLinkPayload(displayTitle, current.url, Boolean(explicitTitle));
+      const { html, text } = buildLinkPayload(displayTitle, current.url);
       const faviconHtml = buildFaviconMarkup(current.faviconDataUri);
       htmlItems.push(`<li>${faviconHtml}${html}</li>`);
       textItems.push(text);
@@ -260,8 +260,8 @@ function createCopyAllLinkHelpers() {
     };
   }
 
-  function buildLinkPayload(currentTitle, currentUrl, hasExplicitTitle) {
-    const issueKey = detectJiraIssueKey(currentUrl, hasExplicitTitle ? currentTitle : null);
+  function buildLinkPayload(currentTitle, currentUrl) {
+    const issueKey = detectJiraIssueKey(currentUrl);
 
     if (issueKey) {
       const suffixTitle = normalizeJiraTitle(currentTitle, issueKey);
@@ -281,7 +281,7 @@ function createCopyAllLinkHelpers() {
     };
   }
 
-  function detectJiraIssueKey(currentUrl, currentTitle) {
+  function detectJiraIssueKey(currentUrl) {
     const KEY_RE = /\b([A-Z]{2,10}-\d{1,6})\b/;
     let parsed;
     try {
@@ -292,10 +292,7 @@ function createCopyAllLinkHelpers() {
 
     if (parsed) {
       const host = parsed.hostname.toLowerCase();
-      const hostLooksLikeJira =
-        /(^|\.)jira\./i.test(host) ||
-        host.endsWith(".atlassian.net") ||
-        host === "atlassian.net";
+      const hostLooksLikeJira = host.includes("jira");
 
       if (hostLooksLikeJira) {
         const pathMatch = parsed.pathname.match(KEY_RE);
@@ -307,11 +304,6 @@ function createCopyAllLinkHelpers() {
           if (queryMatch) return queryMatch[1];
         }
       }
-    }
-
-    if (currentTitle) {
-      const titleMatch = currentTitle.toUpperCase().match(KEY_RE);
-      if (titleMatch) return titleMatch[1];
     }
 
     return null;
